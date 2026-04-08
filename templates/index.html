@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>BIM 智慧养殖 - 数字孪生监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tweenjs/tween.js@23.1.1/dist/tween.umd.js"></script>
+    <style>
+        * {margin:0;padding:0;box-sizing:border-box;}
+        body {font-family:"Microsoft YaHei";background:#0f172a;overflow:hidden;}
+        .container {display:flex;height:100vh;}
+        .bim-view {width:65%;height:100%;position:relative;background:radial-gradient(circle,#1e293b,#0f172a);}
+        #bim-canvas {width:100%;height:100%;}
+        #back-btn {position:absolute;top:20px;left:20px;z-index:100;padding:10px 20px;background:rgba(14,165,233,0.9);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;display:none;}
+        #tooltip {position:absolute;background:rgba(0,0,0,0.9);color:#fff;padding:10px;border-radius:4px;pointer-events:none;display:none;font-size:13px;border:1px solid #0ea5e9;z-index:101;}
+        .data-panel {width:35%;height:100%;padding:20px;overflow-y:auto;background:rgba(15,23,42,0.95);border-left:1px solid #334155;color:#e2e8f0;}
+        .panel-card {background:rgba(30,41,59,0.7);border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:16px;}
+        .card-title {font-size:17px;font-weight:600;margin-bottom:12px;color:#38bdf8;border-bottom:1px solid #334155;padding-bottom:8px;}
+        .info-item {display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e293b;}
+        .info-label {color:#94a3b8;}
+        .info-value {color:#f1f5f9;}
+        .status-stop {color:#f87171;background:rgba(248,113,113,0.15);padding:3px 8px;border-radius:4px;font-size:12px;}
+        .progress-bar {height:8px;border-radius:4px;background:#1e293b;margin:8px 0;}
+        .progress-fill {height:100%;background:linear-gradient(90deg,#0ea5e9,#38bdf8);}
+        .risk-item {display:flex;justify-content:space-between;padding:10px;background:rgba(239,68,68,0.1);border-left:3px solid #ef4444;margin-bottom:8px;border-radius:4px;}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="bim-view">
+        <button id="back-btn" onclick="goBack()">⬅ 返回</button>
+        <div id="tooltip"></div>
+        <div id="bim-canvas"></div>
+    </div>
+    <div class="data-panel">
+        <div class="panel-card">
+            <div class="card-title">🏭 项目概况</div>
+            <div class="info-item"><span class="info-label">项目名称</span><span>{{ workshop.name }}</span></div>
+            <div class="info-item"><span class="info-label">状态</span><span class="status-stop">{{ workshop.status }}</span></div>
+            <div class="info-item"><span class="info-label">层级</span><span id="current-level">工厂总览</span></div>
+        </div>
+        <div class="panel-card">
+            <div class="card-title">📊 实时监测</div>
+            <div class="info-item"><span class="info-label">溶解氧</span><span id="val-do">-- mg/L</span></div>
+            <div class="info-item"><span class="info-label">水温</span><span id="val-temp">-- ℃</span></div>
+            <div class="info-item"><span class="info-label">PH 值</span><span id="val-ph">--</span></div>
+        </div>
+        <div class="panel-card">
+            <div class="card-title">⚙️ 设备状态</div>
+            <div style="font-size:12px;"><span>负载率</span><span id="load-text">0%</span></div>
+            <div class="progress-bar"><div class="progress-fill" id="load-bar" style="width:0%"></div></div>
+        </div>
+        <div class="panel-card">
+            <div class="card-title">⚠️ 高风险设备</div>
+            {% for risk in device.high_risk %}
+            <div class="risk-item"><span>{{ risk.name }}</span><span style="color:#ef4444;">等级{{ risk.risk_level }}</span></div>
+            {% endfor %}
+        </div>
+        <div class="panel-card">
+            <div class="card-title">🐟 养殖区详情</div>
+            <div class="info-item"><span class="info-label">鱼种</span><span>{{ breeding["1#养殖区"].fish_type }}</span></div>
+            <div class="info-item"><span class="info-label">投放量</span><span>{{ breeding["1#养殖区"].stocking_amount }}尾</span></div>
+            <div class="info-item"><span class="info-label">预期收益</span><span style="color:#fbbf24">{{ breeding["1#养殖区"].expected_profit }}万元</span></div>
+        </div>
+    </div>
+</div>
+<script>
+let scene,camera,renderer,controls,raycaster,mouse;
+let objects=[],historyStack=[];
+let currentLevel='factory';
+const tooltip=document.getElementById('tooltip');
+const backBtn=document.getElementById('back-btn');
+const levelLabel=document.getElementById('current-level');
+
+function init(){
+    const container=document.getElementById('bim-canvas');
+    scene=new THREE.Scene();
+    scene.fog=new THREE.FogExp2(0x0f172a,0.02);
+    camera=new THREE.PerspectiveCamera(45,container.clientWidth/container.clientHeight,0.1,1000);
+    camera.position.set(0,18,30);
+    renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+    renderer.setSize(container.clientWidth,container.clientHeight);
+    container.appendChild(renderer.domElement);
+    controls=new THREE.OrbitControls(camera,renderer.domElement);
+    controls.enableDamping=true;
+    const light=new THREE.AmbientLight(0xffffff,2);
+    scene.add(light);
+    const dirLight=new THREE.DirectionalLight(0xffffff,1);
+    dirLight.position.set(10,20,10);
+    scene.add(dirLight);
+    buildModel();
+    raycaster=new THREE.Raycaster();
+    mouse=new THREE.Vector2();
+    window.addEventListener('resize',onResize);
+    window.addEventListener('mousemove',onMouseMove);
+    window.addEventListener('click',onClick);
+    animate();
+}
+
+function buildModel(){
+    // Level1:工厂
+    const factory=new THREE.Mesh(new THREE.BoxGeometry(24,10,16),new THREE.MeshPhysicalMaterial({color:0xadd8e6,transparent:true,opacity:0.15,transmission:0.8}));
+    factory.position.y=5;
+    factory.name="6#海水养殖车间";
+    factory.userData={level:'factory',nextLevel:'workshop',info:'点击进入车间'};
+    scene.add(factory);
+    objects.push(factory);
+    const edges=new THREE.LineSegments(new THREE.EdgesGeometry(factory.geometry),new THREE.LineBasicMaterial({color:0x38bdf8}));
+    factory.add(edges);
+
+    // Level2:养殖池
+    const positions=[{x:-7,z:-4,id:1},{x:7,z:-4,id:2},{x:-7,z:4,id:3},{x:7,z:4,id:4}];
+    positions.forEach(p=>{
+        const pool=new THREE.Mesh(new THREE.CylinderGeometry(3,3,1.8,32),new THREE.MeshStandardMaterial({color:0x0ea5e9}));
+        pool.position.set(p.x,0.9,p.z);
+        pool.name=p.id+"#养殖池";
+        pool.userData={level:'workshop',nextLevel:'device',info:'点击查看设备'};
+        scene.add(pool);
+        objects.push(pool);
+
+        // Level3:设备
+        const color=p.id===1?0xef4444:0x10b981;
+        const machine=new THREE.Mesh(new THREE.BoxGeometry(1.5,2,1.5),new THREE.MeshStandardMaterial({color:color}));
+        machine.position.set(p.x+2.5,1,p.z);
+        machine.name=p.id===1?"制氧机 H_P1_OG1 ⚠️":"循环水泵 P_"+p.id;
+        machine.userData={level:'device',nextLevel:'part',info:p.id===1?'高风险!点击查看零件':'点击查看结构'};
+        scene.add(machine);
+        objects.push(machine);
+
+        // 风扇
+        const fan=new THREE.Mesh(new THREE.TorusGeometry(0.5,0.1,8,20),new THREE.MeshBasicMaterial({color:0xffffff}));
+        fan.position.set(0,0.7,0.76);
+        fan.userData={isFan:true};
+        machine.add(fan);
+
+        // Level4:传感器
+        const sensor=new THREE.Mesh(new THREE.SphereGeometry(0.25,16,16),new THREE.MeshBasicMaterial({color:0xfbbf24}));
+        sensor.position.set(0.5,-0.7,0);
+        sensor.name="液位探头 LV"+p.id;
+        sensor.userData={level:'part',info:'精度:±0.1mm | 状态正常'};
+        machine.add(sensor);
+        objects.push(sensor);
+    });
+
+    scene.add(new THREE.GridHelper(50,50,0x334155,0x1e293b));
+}
+
+function onMouseMove(e){
+    const rect=renderer.domElement.getBoundingClientRect();
+    mouse.x=((e.clientX-rect.left)/rect.width)*2-1;
+    mouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera(mouse,camera);
+    const hits=raycaster.intersectObjects(objects);
+    if(hits.length>0){
+        let t=hits[0].object;
+        while(t.parent&&t.parent.type!=='Scene'&&!t.userData.level)t=t.parent;
+        document.body.style.cursor='pointer';
+        tooltip.style.display='block';
+        tooltip.style.left=(e.clientX+15)+'px';
+        tooltip.style.top=(e.clientY+15)+'px';
+        tooltip.innerHTML='<strong style="color:#38bdf8">'+t.name+'</strong><br>'+(t.userData.info||'');
+        if(t.material&&t.material.emissive)t.material.emissive.setHex(0x222222);
+    }else{
+        document.body.style.cursor='default';
+        tooltip.style.display='none';
+        objects.forEach(o=>{if(o.material&&o.material.emissive)o.material.emissive.setHex(0);});
+    }
+}
+
+function onClick(e){
+    if(tooltip.style.display==='none')return;
+    raycaster.setFromCamera(mouse,camera);
+    const hits=raycaster.intersectObjects(objects);
+    if(hits.length>0){
+        let t=hits[0].object;
+        while(t.parent&&t.parent.type!=='Scene'&&!t.userData.level)t=t.parent;
+        if(t.userData.nextLevel)drillDown(t);
+    }
+}
+
+function drillDown(obj){
+    historyStack.push({pos:camera.position.clone(),tgt:controls.target.clone(),lvl:currentLevel});
+    const box=new THREE.Box3().setFromObject(obj);
+    const center=box.getCenter(new THREE.Vector3());
+    const size=box.getSize(new THREE.Vector3());
+    const maxDim=Math.max(size.x,size.y,size.z);
+    const fov=camera.fov*(Math.PI/180);
+    const dist=maxDim/2*Math.tan(fov*2)*2.5;
+    const newPos=center.clone().add(new THREE.Vector3(dist,dist*0.6,dist));
+    new TWEEN.Tween(camera.position).to({x:newPos.x,y:newPos.y,z:newPos.z},1000).easing(TWEEN.Easing.Cubic.Out).start();
+    new TWEEN.Tween(controls.target).to({x:center.x,y:center.y,z:center.z},1000).easing(TWEEN.Easing.Cubic.Out).onComplete(()=>{
+        currentLevel=obj.userData.nextLevel;
+        updateUI();
+    }).start();
+}
+
+window.goBack=function(){
+    if(historyStack.length===0)return;
+    const s=historyStack.pop();
+    new TWEEN.Tween(camera.position).to({x:s.pos.x,y:s.pos.y,z:s.pos.z},1000).easing(TWEEN.Easing.Cubic.Out).start();
+    new TWEEN.Tween(controls.target).to({x:s.tgt.x,y:s.tgt.y,z:s.tgt.z},1000).easing(TWEEN.Easing.Cubic.Out).onComplete(()=>{
+        currentLevel=s.lvl;
+        updateUI();
+    }).start();
+};
+
+function updateUI(){
+    const names={factory:'工厂总览',workshop:'车间/养殖池',device:'设备详情',part:'零件视图'};
+    levelLabel.innerText=names[currentLevel];
+    backBtn.style.display=historyStack.length>0?'block':'none';
+    document.getElementById('load-bar').style.width=currentLevel==='factory'?'40%':'85%';
+    document.getElementById('load-text').innerText=currentLevel==='factory'?'40%':'85%';
+}
+
+function onResize(){
+    const c=document.getElementById('bim-canvas');
+    camera.aspect=c.clientWidth/c.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(c.clientWidth,c.clientHeight);
+}
+
+function animate(t){
+    requestAnimationFrame(animate);
+    TWEEN.update(t);
+    controls.update();
+    scene.traverse(o=>{if(o.userData.isFan)o.rotation.z+=0.08;});
+    renderer.render(scene,camera);
+}
+
+init();
+setInterval(()=>{
+    if(currentLevel==='device'||currentLevel==='part'){
+        $('#val-do').text((6.5+Math.random()*2).toFixed(2)+' mg/L');
+        $('#val-temp').text((24+Math.random()).toFixed(1)+' ℃');
+        $('#val-ph').text((7.2+Math.random()*0.3).toFixed(1));
+    }
+},2000);
+</script>
+</body>
+</html>
