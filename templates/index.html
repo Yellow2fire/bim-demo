@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>工厂化循环水智慧养殖BIM系统</title>
+    <!-- 引入CDN依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- 基础样式 -->
+    <style>
+        * {margin: 0; padding: 0; box-sizing: border-box;}
+        body {font-family: "Microsoft YaHei", sans-serif; background: #f5f7fa;}
+        .container {display: flex; height: 100vh;}
+        /* 左侧BIM 3D视图区 */
+        .bim-view {width: 60%; height: 100%; background: #fff; border-right: 1px solid #e5e7eb;}
+        #bim-canvas {width: 100%; height: 100%;}
+        /* 右侧数据面板区 */
+        .data-panel {width: 40%; height: 100%; padding: 20px; overflow-y: auto;}
+        .panel-card {background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);}
+        .card-title {font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #1f2937;}
+        .info-item {display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6;}
+        .info-label {color: #6b7280;}
+        .info-value {color: #111827; font-weight: 500;}
+        .status-stop {color: #dc2626; background: #fee2e2; padding: 2px 8px; border-radius: 4px; font-size: 12px;}
+        .progress-bar {height: 24px; border-radius: 12px; background: #e5e7eb; margin: 8px 0; overflow: hidden;}
+        .progress-fill {height: 100%; background: #0ea5e9;}
+        .risk-item {display: flex; justify-content: space-between; padding: 8px 0;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧BIM 3D可视化区域 -->
+        <div class="bim-view">
+            <div id="bim-canvas"></div>
+        </div>
+        <!-- 右侧数据面板 -->
+        <div class="data-panel">
+            <!-- 项目概况 -->
+            <div class="panel-card">
+                <div class="card-title">项目概况</div>
+                <div class="info-item">
+                    <span class="info-label">项目名称</span>
+                    <span class="info-value">{{ workshop.name }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">项目地址</span>
+                    <span class="info-value">{{ workshop.address }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">建筑面积</span>
+                    <span class="info-value">{{ workshop.area }} 平方米</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">养殖水体</span>
+                    <span class="info-value">{{ workshop.water_volume }} 平方米</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">系统套数</span>
+                    <span class="info-value">{{ workshop.system_count }} 套</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">运营情况</span>
+                    <span class="info-value"><span class="status-stop">{{ workshop.status }}</span></span>
+                </div>
+            </div>
+
+            <!-- 无人值守数据 -->
+            <div class="panel-card">
+                <div class="card-title">无人值守</div>
+                <div>
+                    <div>设备运行数量 {{ device.running }} / {{ device.total }}</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {{ (device.running/device.total)*100 }}%"></div>
+                    </div>
+                </div>
+                <div style="margin-top: 16px;">
+                    <div>控制策略开启数 {{ device.strategy_running }} / {{ device.total }}</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {{ (device.strategy_running/device.total)*100 }}%; background: #6366f1;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 高风险设备排名 -->
+            <div class="panel-card">
+                <div class="card-title">高风险设备排名</div>
+                {% for risk in device.high_risk %}
+                <div class="risk-item">
+                    <span>{{ loop.index }} {{ risk.name }}</span>
+                    <span>{{ risk.risk_level }}</span>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- 1#养殖区详情 -->
+            <div class="panel-card">
+                <div class="card-title">1#养殖区详情</div>
+                <div class="info-item">
+                    <span class="info-label">养殖状态</span>
+                    <span class="info-value" style="color: #10b981;">{{ breeding["1#养殖区"].status }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">鱼种</span>
+                    <span class="info-value">{{ breeding["1#养殖区"].fish_type }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">投放量</span>
+                    <span class="info-value">{{ breeding["1#养殖区"].stocking_amount }} 尾</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">吊水起始时间</span>
+                    <span class="info-value">{{ breeding["1#养殖区"].water_change_start }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">预计出货时间</span>
+                    <span class="info-value">{{ breeding["1#养殖区"].expected_shipment }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">预期收益</span>
+                    <span class="info-value">{{ breeding["1#养殖区"].expected_profit }} 万元</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 初始化Three.js 3D BIM场景（模拟养殖车间模型）
+        function initBIMScene() {
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf5f7fa);
+            
+            // 相机
+            const camera = new THREE.PerspectiveCamera(75, document.getElementById('bim-canvas').clientWidth / document.getElementById('bim-canvas').clientHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // 渲染器
+            const renderer = new THREE.WebGLRenderer();
+            renderer.setSize(document.getElementById('bim-canvas').clientWidth, document.getElementById('bim-canvas').clientHeight);
+            document.getElementById('bim-canvas').appendChild(renderer.domElement);
+
+            // 控制器（支持鼠标旋转/缩放）
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // 模拟养殖车间几何体（实际项目替换为BIM模型加载）
+            // 养殖区主体
+            const workshopGeometry = new THREE.BoxGeometry(4, 3, 2);
+            const workshopMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xadd8e6, 
+                wireframe: true, // 线框模式模拟BIM图纸
+                transparent: true,
+                opacity: 0.7
+            });
+            const workshopMesh = new THREE.Mesh(workshopGeometry, workshopMaterial);
+            scene.add(workshopMesh);
+
+            // 标记1#养殖区
+            const area1Geometry = new THREE.BoxGeometry(1, 1, 1);
+            const area1Material = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.5 });
+            const area1Mesh = new THREE.Mesh(area1Geometry, area1Material);
+            area1Mesh.position.x = -1;
+            scene.add(area1Mesh);
+
+            // 标记高风险设备（液位探头）
+            const sensorGeometry = new THREE.SphereGeometry(0.2);
+            const sensorMaterial = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+            const sensorMesh = new THREE.Mesh(sensorGeometry, sensorMaterial);
+            sensorMesh.position.y = 1;
+            scene.add(sensorMesh);
+
+            // 动画循环
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // 窗口自适应
+            window.addEventListener('resize', () => {
+                camera.aspect = document.getElementById('bim-canvas').clientWidth / document.getElementById('bim-canvas').clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(document.getElementById('bim-canvas').clientWidth, document.getElementById('bim-canvas').clientHeight);
+            });
+        }
+
+        // 2. 实时获取设备数据并更新
+        function updateRealtimeData() {
+            setInterval(() => {
+                $.get('/api/realtime-data', (data) => {
+                    // 可扩展：更新页面实时数据，例如设备运行数量、传感器数值等
+                    console.log("实时数据更新：", data);
+                });
+            }, 5000); // 每5秒更新一次
+        }
+
+        // 页面加载完成后初始化
+        $(document).ready(() => {
+            initBIMScene();
+            updateRealtimeData();
+        });
+    </script>
+</body>
+</html>
